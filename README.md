@@ -8,7 +8,7 @@ For details on how to use the corresponding CloudFormation templates, refer to t
 
 CloudFormation Templates:
 
-* [manageThirdPartyApplications-CFN.yaml](/Templates/CloudFormation/manageThirdPartyApplications-CFN.yml)
+* [manageThirdPartyApplications-CFN.yml](/Templates/CloudFormation/manageThirdPartyApplications-CFN.yml)
 
 ![Architecture diagram for Patch reporting](Images/centralized-management-of-third-party-applications.png)
 
