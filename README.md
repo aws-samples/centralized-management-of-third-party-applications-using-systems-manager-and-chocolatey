@@ -1,11 +1,16 @@
-## My Project
+# Automate Systems Manager patching reports via email and slack notifications in an AWS Organization
 
-TODO: Fill this README out!
+This repo hosts CloudFormation templates related to the AWS Cloud Operations blog post:
 
-Be sure to:
+[**Manage third party application installation, versioning and updates in Windows Server nodes using AWS System Manager and Chocolatey**](https://aws.amazon.com/blogs/mt/)
 
-* Change the title in this README
-* Edit your repository description on GitHub
+For details on how to use the corresponding CloudFormation templates, refer to the blog post.
+
+CloudFormation Templates:
+
+* [manageThirdPartyApplications-CFN.yaml](/Templates/CloudFormation/manageThirdPartyApplications-CFN.yaml)
+
+![Architecture diagram for Patch reporting](Images/centralized-management-of-third-party-applications.png)
 
 ## Security
 
@@ -14,4 +19,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
-
