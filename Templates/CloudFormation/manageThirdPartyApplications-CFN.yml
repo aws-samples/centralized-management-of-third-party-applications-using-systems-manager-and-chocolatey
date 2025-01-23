@@ -1,0 +1,211 @@
+---
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: AWS CloudFormation template will create the necessary resources to install and configure the installation of 3rd applications using Chocolatey.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Parameters:
+          - PackageNameParameterArn
+          - AssociationSchedule
+          - TargetAllManagedInstances
+          - TargetTagKey
+          - TargetTagValue
+          - ResourceSharePrincipal
+
+Parameters:
+  PackageNameParameterArn:
+    Description: (Required) The ARN (Amazon Resource Name) of the parameter that includes the package names.
+    Type: String
+    AllowedPattern: arn:(|aws|aws-cn|aws-us-gov):ssm:[a-z0-9-]+:[0-9]{12}:parameter/.*
+
+  ResourceSharePrincipal:
+    Description: (Optional) Specifies the ARN of an organization or organizational unit (OU) in AWS Organizations to associate with the resource share. Leave it empty for a member or single Account setup.
+    Type: String
+    Default: ""
+    AllowedPattern: ^(|arn:(|aws|aws-cn|aws-us-gov):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}|arn:(|aws|aws-cn|aws-us-gov):organizations::[0-9]{12}:ou/o-[a-z0-9]{10,32}/ou-[a-z0-9]{4,32}-[a-z0-9]{8,32})$
+    ConstraintDescription: Must be empty, an organization ARN, or an OU ARN
+
+  AssociationSchedule:
+    Description: "(Required) The cron expression to use for the association in UTC. For more information about this format, see the AWS Systems Manager documentation: https://docs.aws.amazon.com/systems-manager/latest/userguide/reference-cron-and-rate-expressions.html#reference-cron-and-rate-expressions-association"
+    Type: String
+    Default: cron(0 1 ? * * *)
+    AllowedPattern: ^cron\([^)]+\)$
+
+  TargetAllManagedInstances:
+    Description: (Optional) The association will target all instances managed by AWS Systems Manager in the region. If you select 'false', the TargetTagKey and TargetTagValue parameters must be used.
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: true
+
+  TargetTagKey:
+    Description: (Optional) The tag key for the target instances managed by AWS Systems Manager in the region. The TargetAllManagedInstances parameter must be set to 'false'.
+    Type: String
+    Default: ""
+    MaxLength: 128
+
+  TargetTagValue:
+    Description: (Optional) The tag value for the target instances managed by AWS Systems Manager in the region. The TargetAllManagedInstances parameter must be set to 'false'.
+    Type: String
+    Default: ""
+    MaxLength: 128
+
+Rules:
+  ValidateTargetAll:
+    RuleCondition: !Equals
+      - !Ref TargetAllManagedInstances
+      - "false"
+    Assertions:
+      - Assert: !Not
+          - !Equals
+            - !Ref TargetTagKey
+            - ""
+        AssertDescription: The TargetTagKey parameter's value cannot be empty if the TargetAllManagedInstances parameter is set to 'false'.
+      - Assert: !Not
+          - !Equals
+            - !Ref TargetTagValue
+            - ""
+        AssertDescription: The TargetTagValue parameter's value cannot be empty if the TargetAllManagedInstances parameter is set to 'false'.
+
+Conditions:
+  TargetAll: !Equals
+    - !Ref TargetAllManagedInstances
+    - true
+
+  MultipleAccounts: !Not
+    - !Equals
+      - !Ref ResourceSharePrincipal
+      - ""
+
+Resources:
+  ChocolateyCommandDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Content:
+        schemaVersion: "2.2"
+        description: Run a script on Windows instances to install Chocolatey packages.
+        parameters:
+          PackageNameArn:
+            type: String
+            description: (Required) The ARN (Amazon Resource Name) of the parameter that includes the package names.
+            default: !Ref PackageNameParameterArn
+        mainSteps:
+          - action: aws:runPowerShellScript
+            name: runPowerShellScript
+            precondition:
+              StringEquals:
+                - platformType
+                - Windows
+            inputs:
+              timeoutSeconds: "3600"
+              runCommand:
+                - |
+                  try{
+                    if (!(Test-Path "$($env:ProgramData)\chocolatey\choco.exe")) {
+                      Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+                      write-output "Chocolatey installed successfully"
+                    }
+                    $env:Path += ";$($env:ProgramData)\chocolatey\bin"
+                    $Packages = ((Get-SSMParameterValue -Name {{ PackageNameArn }}).Parameters[0].Value) | ConvertFrom-Json
+                    write-output "Package list from the parameter store is "$Packages
+                    foreach ($Package in $Packages) {
+                      if (($Package.Version -ne "latest" -or $Package.Version -eq "") -and ($Package.Upgrade -ne "yes" -or $Package.Upgrade -ne "no") -and $Package.Name -eq "") {
+                        write-output "The package configuration for $($Package) is missing some parameters. Skipping..."
+                      }
+                      else {
+                        write-output "New Package - $($Package.Name)...."
+                        $ChocoOutput = choco list $Package.Name -r -e
+                        if (-not $ChocoOutput) {
+                          if ($Package.Version -eq "latest") {
+                            write-output "The package is not installed by chocolatey, Version is set to latest. Installing the latest version"
+                            choco install $Package.Name -r -y --no-progress $Package.Switches
+                          }
+                          else {
+                            write-output "The package is not installed by chocolatey, Version is set. Installing the $($Package.Version) version"
+                            choco install $Package.Name --version=$($Package.Version) -r -y --no-progress $Package.Switches
+                          }
+                        }
+                        elseif ($Package.Upgrade -eq "yes") {
+                          $parts = $ChocoOutput.split('|');
+                          $currentVersion = $parts[1]
+                          if ($Package.Version -eq "latest") {
+                            write-output "The package is installed by chocolatey, Version is set to latest, Upgrade is set to yes. Upgrading to the latest version"
+                            choco upgrade $Package.Name -r -y --no-progress $Package.Switches
+                          }
+                          elseif ($Package.Version -ne ""  -and [System.Version]$Package.Version -gt [System.Version]$currentVersion) {
+                            write-output "The package is installed by chocolatey, Version is set, Upgrade is set to yes. Upgrading to $($Package.Version) version"
+                            choco upgrade $Package.Name --version=$($Package.Version) -r -y --no-progress $Package.Switches
+                          }
+                          elseif ([System.Version]$Package.Version -lt [System.Version]$currentVersion) {
+                            write-output "The package version installed by chocolatey is $currentVersion. It is newer version than the one specified in the parameter store $($Package.Version). Skipping..."
+                          }
+                        }
+                        elseif ($Package.Upgrade -eq "no") {
+                          write-output "The package is installed by chocolatey, Upgrade is set to no. Skipping..."
+                        }
+                      }
+                    }
+                  }
+                  catch{
+                      Write-Error -Message "An error occurred: "
+                      Write-Error $_
+                  }
+      DocumentFormat: YAML
+      DocumentType: Command
+
+  ChocolateyAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      ApplyOnlyAtCronInterval: true
+      AssociationName: Chocolatey-Package-Installer
+      Name: !Ref ChocolateyCommandDocument
+      ScheduleExpression: !Ref AssociationSchedule
+      AutomationTargetParameterName: InstanceId
+      Targets:
+        - !If
+          - TargetAll
+          - Key: InstanceIds
+            Values:
+              - "*"
+          - Key: !Sub tag:${TargetTagKey}
+            Values:
+              - !Ref TargetTagValue
+
+  ChocolateyResourceShare:
+    Condition: MultipleAccounts
+    Type: AWS::RAM::ResourceShare
+    Properties:
+      Name: Parameter store for chocolatey packages
+      ResourceArns:
+        - !Ref PackageNameParameterArn
+      Principals:
+        - !Ref ResourceSharePrincipal
+      AllowExternalPrincipals: false
+
+Outputs:
+  AWSSystemsManagerCommandDocument:
+    Description: AWS Systems Manager Document
+    Value: !Ref ChocolateyCommandDocument
+
+  AWSSystemsManagerStateManagerAssociation:
+    Description: AWS Systems Manager Association
+    Value: !Ref ChocolateyAssociation
