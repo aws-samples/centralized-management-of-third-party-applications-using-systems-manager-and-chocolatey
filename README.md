@@ -2,7 +2,7 @@
 
 This repo hosts CloudFormation templates related to the AWS Cloud Operations blog post:
 
-[**Manage third party application installation, versioning and updates in Windows Server nodes using AWS System Manager and Chocolatey**](https://aws.amazon.com/blogs/mt/)
+[**Manage third party application installation, versioning and updates in Windows Server nodes using AWS System Manager and Chocolatey**](https://aws.amazon.com/blogs/mt/manage-third-party-application-installation-versioning-and-updates-in-windows-server-nodes-using-aws-system-manager-and-chocolatey/)
 
 For details on how to use the corresponding CloudFormation templates, refer to the blog post.
 
